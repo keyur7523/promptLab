@@ -2,11 +2,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import hashlib
 
 from app.config import get_settings
 from app.middleware.logging import LoggingMiddleware
 from app.api import chat, feedback, health, setup
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
+from app.models import User, Experiment
 
 settings = get_settings()
 
@@ -49,10 +51,39 @@ app.include_router(setup.router, tags=["setup"])
 async def startup_event():
     """Initialize services on startup."""
     # Create database tables if they don't exist
-    # In production, use Alembic migrations instead
-    if settings.debug:
-        Base.metadata.create_all(bind=engine)
-        logging.info("Database tables created (debug mode)")
+    # This ensures tables exist even if the database was reset
+    Base.metadata.create_all(bind=engine)
+    logging.info("Database tables verified/created on startup")
+
+    # Seed initial data if database is empty
+    db = SessionLocal()
+    try:
+        existing_user = db.query(User).first()
+        if not existing_user:
+            logging.info("Empty database detected, seeding initial data...")
+
+            # Create default user
+            test_api_key = "test-key-123"
+            api_key_hash = hashlib.sha256(test_api_key.encode()).hexdigest()
+            user = User(api_key_hash=api_key_hash, rate_limit=100)
+            db.add(user)
+
+            # Create default experiment
+            experiment = Experiment(
+                key="prompt_experiment_jan2024",
+                description="Test concise vs detailed prompts",
+                variants={"control": 34, "concise": 33, "friendly": 33},
+                active=True
+            )
+            db.add(experiment)
+
+            db.commit()
+            logging.info("Database seeded with default user and experiment")
+    except Exception as e:
+        logging.error(f"Error seeding database: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 @app.on_event("shutdown")
