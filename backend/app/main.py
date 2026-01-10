@@ -5,7 +5,7 @@ import logging
 
 from app.config import get_settings
 from app.middleware.logging import LoggingMiddleware
-from app.api import chat, feedback, health
+from app.api import chat, feedback, health, setup
 from app.database import engine, Base
 
 settings = get_settings()
@@ -42,6 +42,7 @@ app.add_middleware(LoggingMiddleware)
 app.include_router(health.router, tags=["health"])
 app.include_router(chat.router, tags=["chat"])
 app.include_router(feedback.router, tags=["feedback"])
+app.include_router(setup.router, tags=["setup"])
 
 
 @app.on_event("startup")
