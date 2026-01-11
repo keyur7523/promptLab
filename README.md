@@ -520,16 +520,11 @@ This section analyzes how PromptLab would behave under production load and what 
 | Concurrent Streams | 100 | 10,000+ | Worker count |
 | Messages/day | 10K | 10M+ | Async writes, partitioning |
 
-## License
-
-MIT License - feel free to use for learning!
 
 ## Contact
 
-Built by Keyur
-Resume project demonstrating production backend engineering
-[LinkedIn](your-linkedin) | [Email](your-email)
+Built by Keyur Pawaskar
+[LinkedIn](https://www.linkedin.com/in/keyur-pawaskar-7b05b6169/) | [Email](codekeyur7523@gmail.com)
 
 ---
 
-**⭐ Star this repo if you find it useful!**
