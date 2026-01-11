@@ -314,6 +314,17 @@ vercel --prod
 - Update `FRONTEND_URL` in Render backend settings
 - Test the live chat!
 
+### Keep Services Alive (Free Tier)
+
+Render's free tier spins down services after 15 minutes of inactivity, causing 50+ second cold starts. To prevent this, use [UptimeRobot](https://uptimerobot.com) (free) to ping your services every 5 minutes:
+
+1. Sign up at uptimerobot.com
+2. Add Monitor → HTTP(s)
+3. URL: `https://your-backend.onrender.com/health`
+4. Interval: 5 minutes
+
+The Python backend also has a built-in keep-alive that pings the Rust token counter every 10 minutes, so you only need to monitor the Python backend.
+
 ## What This Demonstrates
 
 ✅ **Consumer-scale backend design** - Rate limiting, streaming, cost tracking
