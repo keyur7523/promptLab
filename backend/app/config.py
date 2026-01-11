@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # CORS
     frontend_url: str = "http://localhost:5173"
 
+    # Rust Token Counter Service
+    token_counter_url: str = "http://localhost:3001"
+    token_counter_enabled: bool = True
+    token_counter_timeout: float = 0.5  # seconds - fail fast to avoid blocking
+
     class Config:
         env_file = ".env"
         case_sensitive = False

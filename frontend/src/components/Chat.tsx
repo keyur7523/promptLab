@@ -70,7 +70,7 @@ export default function Chat() {
         }
 
         if (result.metadata) {
-          // Update with final metadata
+          // Update with final metadata including token stats
           setMessages((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
@@ -78,6 +78,10 @@ export default function Chat() {
               id: result.metadata!.message_id,
               variant: result.metadata!.variant,
               model: result.metadata!.model,
+              tokens_in: result.metadata!.tokens_in,
+              tokens_out: result.metadata!.tokens_out,
+              latency_ms: result.metadata!.latency_ms,
+              cost: result.metadata!.cost,
             };
             return updated;
           });
@@ -114,7 +118,7 @@ export default function Chat() {
     <div className="chat-container">
       {/* Header */}
       <div className="chat-header">
-        <h1>AI Chat Platform</h1>
+        <h1>PromptLab</h1>
         <div className="header-controls">
           <label className="dev-mode-toggle">
             <input

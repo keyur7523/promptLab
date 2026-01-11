@@ -9,6 +9,10 @@ export interface Message {
   variant?: string;
   model?: string;
   timestamp?: Date;
+  tokens_in?: number;
+  tokens_out?: number;
+  latency_ms?: number;
+  cost?: number;
 }
 
 export interface ChatRequest {
@@ -31,4 +35,5 @@ export interface StreamMetadata {
   tokens_in?: number;
   tokens_out?: number;
   latency_ms?: number;
+  cost?: number;
 }

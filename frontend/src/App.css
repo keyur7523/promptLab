@@ -109,6 +109,67 @@
   border: 1px solid #e5e7eb;
 }
 
+/* Token Stats */
+.token-stats {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 0.5rem;
+  border: 1px solid #bae6fd;
+}
+
+.token-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.token-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #0369a1;
+  background: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid #e0f2fe;
+}
+
+.token-stat-icon {
+  font-size: 0.625rem;
+  opacity: 0.7;
+}
+
+.token-stat-value {
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+
+.token-stat-label {
+  font-size: 0.625rem;
+  opacity: 0.7;
+}
+
+.token-stat.total {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
+.token-stat.latency {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.token-stat.cost {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+
 /* Feedback Buttons */
 .feedback-buttons {
   display: flex;

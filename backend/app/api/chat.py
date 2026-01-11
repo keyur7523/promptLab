@@ -16,6 +16,7 @@ from app.middleware.logging import get_logger
 from app.services.llm import LLMService
 from app.services.experiments import ExperimentService
 from app.services.rate_limiter import RateLimiter
+from app.services.token_counter import get_token_counter
 from app.config import get_settings
 
 router = APIRouter()
@@ -23,7 +24,15 @@ settings = get_settings()
 logger = get_logger()
 
 # Initialize services
-llm_service = LLMService(api_key=settings.openai_api_key)
+token_counter = get_token_counter(
+    base_url=settings.token_counter_url,
+    timeout=settings.token_counter_timeout,
+    enabled=settings.token_counter_enabled
+)
+llm_service = LLMService(
+    api_key=settings.openai_api_key,
+    token_counter=token_counter
+)
 redis_client = redis.from_url(settings.redis_url)
 rate_limiter = RateLimiter(redis_client)
 
@@ -165,6 +174,14 @@ async def chat(
     # (to avoid accessing detached ORM object after session closes)
     conversation_id = str(conversation.id)
 
+    # Pre-estimate tokens (demonstrates Rust integration)
+    estimated_tokens = await llm_service.pre_estimate_tokens(messages, "gpt-3.5-turbo")
+    logger.info(
+        "pre_estimated_tokens",
+        estimated_tokens=estimated_tokens,
+        message_count=len(messages)
+    )
+
     # Stream response
     async def event_stream():
         full_content = ""
@@ -223,7 +240,8 @@ async def chat(
                     "model": metadata.get("model", "gpt-3.5-turbo"),
                     "tokens_in": metadata.get("tokens_in"),
                     "tokens_out": metadata.get("tokens_out"),
-                    "latency_ms": metadata.get("latency_ms")
+                    "latency_ms": metadata.get("latency_ms"),
+                    "cost": metadata.get("cost")
                 }
                 yield f"data: {json.dumps(final_data)}\n\n"
 

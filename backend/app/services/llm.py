@@ -1,14 +1,42 @@
 """LLM service for chat completions with streaming."""
 import openai
-from typing import AsyncGenerator, List, Dict, Tuple
+from typing import AsyncGenerator, List, Dict, Tuple, Optional
 import time
+
+from .token_counter import TokenCounterClient
 
 
 class LLMService:
     """Service for interacting with LLM APIs (OpenAI)."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, token_counter: Optional[TokenCounterClient] = None):
         self.client = openai.AsyncOpenAI(api_key=api_key)
+        self.token_counter = token_counter
+
+    async def pre_estimate_tokens(self, messages: List[Dict[str, str]], model: str) -> int:
+        """
+        Pre-estimate input tokens before making an LLM call.
+
+        Uses the Rust token counter service if available, falls back to local estimation.
+        Useful for rate limiting by tokens or cost budgeting before expensive API calls.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            model: Model name
+
+        Returns:
+            Estimated token count for the input
+        """
+        if self.token_counter is None:
+            # Fallback: rough word-based estimation
+            return sum(len(msg.get("content", "").split()) for msg in messages)
+
+        # Combine all message content for estimation
+        combined_text = " ".join(
+            f"{msg.get('role', '')}: {msg.get('content', '')}"
+            for msg in messages
+        )
+        return await self.token_counter.estimate_tokens(combined_text, model)
 
     async def stream_chat(
         self,
@@ -81,20 +109,40 @@ class LLMService:
             # Re-raise with context
             raise Exception(f"LLM streaming error: {str(e)}") from e
 
+    async def _calculate_cost_async(self, model: str, tokens_in: int, tokens_out: int) -> float:
+        """
+        Calculate cost in USD for API call using Rust service if available.
+
+        Falls back to local calculation if Rust service is unavailable.
+        """
+        if self.token_counter is not None:
+            result = await self.token_counter.estimate_cost(
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out
+            )
+            return result["cost_usd"]
+
+        return self._calculate_cost(model, tokens_in, tokens_out)
+
     def _calculate_cost(self, model: str, tokens_in: int, tokens_out: int) -> float:
         """
-        Calculate cost in USD for API call.
+        Calculate cost in USD for API call (local fallback).
 
         Pricing as of Jan 2024 (update as needed):
         - gpt-3.5-turbo: $0.0005 / 1K input, $0.0015 / 1K output
         - gpt-4: $0.03 / 1K input, $0.06 / 1K output
         - gpt-4-turbo: $0.01 / 1K input, $0.03 / 1K output
+        - gpt-4o: $0.005 / 1K input, $0.015 / 1K output
+        - gpt-4o-mini: $0.00015 / 1K input, $0.0006 / 1K output
         """
         pricing = {
             "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
             "gpt-4": {"input": 0.03, "output": 0.06},
             "gpt-4-turbo": {"input": 0.01, "output": 0.03},
             "gpt-4-turbo-preview": {"input": 0.01, "output": 0.03},
+            "gpt-4o": {"input": 0.005, "output": 0.015},
+            "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
         }
 
         # Default to gpt-3.5-turbo pricing if model not found
