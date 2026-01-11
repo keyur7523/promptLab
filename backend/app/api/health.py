@@ -12,9 +12,10 @@ settings = get_settings()
 
 
 @router.get("/health")
+@router.head("/health")
 async def health_check():
     """Basic health check."""
-    return {"status": "healthy", "service": "ai-chat-backend"}
+    return {"status": "healthy", "service": "promptlab-backend"}
 
 
 @router.get("/health/detailed")
