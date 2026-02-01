@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     # CORS
     frontend_url: str = "http://localhost:5173"
 
+    # Experimentation
+    # Active experiment key for chat - set to empty string to auto-select from DB
+    active_experiment_key: str = ""
+
+    # Streaming limits
+    max_concurrent_streams_per_user: int = 5  # Max simultaneous streams per user
+    stream_timeout_seconds: int = 120  # Max duration for a single stream
+    llm_response_timeout_seconds: int = 60  # Timeout for LLM provider response
+
     # Rust Token Counter Service
     token_counter_url: str = "http://localhost:3001"
     token_counter_enabled: bool = True

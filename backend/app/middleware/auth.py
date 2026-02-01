@@ -1,8 +1,18 @@
-"""API key authentication middleware."""
+"""API key authentication middleware.
+
+Uses SHA256 hashing for API keys with direct database lookup.
+This provides O(1) lookup time vs the previous O(n) approach.
+
+Note: API keys use SHA256 (not bcrypt) because:
+- API keys are high-entropy random strings, not user-chosen passwords
+- Brute-force protection comes from key length (32+ chars), not hash slowness
+- Fast lookup is critical for every authenticated request
+- The api_key_hash column is indexed for O(1) database lookup
+"""
+import hashlib
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
-from passlib.context import CryptContext
 from typing import Optional
 
 from app.database import get_db
@@ -11,23 +21,23 @@ from app.models.user import User
 # API key header
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_api_key(api_key: str) -> str:
-    """Hash an API key for storage."""
-    return pwd_context.hash(api_key)
+    """
+    Hash an API key for storage using SHA256.
 
+    SHA256 is appropriate for API keys because:
+    - Deterministic: same input always produces same hash (required for lookup)
+    - Fast: O(1) verification via direct database query on indexed column
+    - Secure: API keys are randomly generated with high entropy
 
-def verify_api_key(plain_key: str, hashed_key: str) -> bool:
-    """Verify an API key against its hash."""
-    try:
-        return pwd_context.verify(plain_key, hashed_key)
-    except:
-        # Fallback to simple sha256 for development
-        import hashlib
-        return hashlib.sha256(plain_key.encode()).hexdigest() == hashed_key
+    Args:
+        api_key: Plain text API key
+
+    Returns:
+        SHA256 hex digest of the API key
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
 
 
 async def get_current_user(
@@ -36,6 +46,10 @@ async def get_current_user(
 ) -> User:
     """
     Dependency to validate API key and get current user.
+
+    Uses direct database lookup by hashed API key for O(1) performance.
+    The api_key_hash column is indexed, making this query fast even with
+    millions of users.
 
     Usage:
         @router.get("/protected")
@@ -52,19 +66,22 @@ async def get_current_user(
             headers={"WWW-Authenticate": "ApiKey"}
         )
 
-    # Query all users and check API key hash
-    # Note: In production with many users, consider indexing strategy
-    users = db.query(User).all()
+    # Hash the provided API key and lookup directly by hash
+    # This is O(1) with the indexed api_key_hash column
+    api_key_hash = hash_api_key(api_key)
 
-    for user in users:
-        if verify_api_key(api_key, user.api_key_hash):
-            return user
+    user = db.query(User).filter(
+        User.api_key_hash == api_key_hash
+    ).first()
 
-    raise HTTPException(
-        status_code=401,
-        detail="Invalid API key",
-        headers={"WWW-Authenticate": "ApiKey"}
-    )
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "ApiKey"}
+        )
+
+    return user
 
 
 def create_user_with_api_key(db: Session, api_key: str, rate_limit: int = 100) -> User:
@@ -73,7 +90,7 @@ def create_user_with_api_key(db: Session, api_key: str, rate_limit: int = 100) -
 
     Args:
         db: Database session
-        api_key: Plain text API key (will be hashed)
+        api_key: Plain text API key (will be hashed with SHA256)
         rate_limit: Requests per hour limit
 
     Returns:

@@ -1,10 +1,18 @@
-"""Chat endpoints with streaming support."""
+"""Chat endpoints with streaming support.
+
+Features:
+- SSE streaming with backpressure control
+- Concurrent stream limiting per user
+- Timeout handling for LLM responses
+- Clean disconnect handling
+"""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Dict
 import json
 import redis
+import asyncio
 
 from app.database import get_db
 from app.schemas.chat import ChatRequest
@@ -16,6 +24,7 @@ from app.middleware.logging import get_logger
 from app.services.llm import LLMService
 from app.services.experiments import ExperimentService
 from app.services.rate_limiter import RateLimiter
+from app.services.stream_limiter import StreamLimiter, StreamLimitExceeded
 from app.services.token_counter import get_token_counter
 from app.config import get_settings
 
@@ -35,6 +44,10 @@ llm_service = LLMService(
 )
 redis_client = redis.from_url(settings.redis_url)
 rate_limiter = RateLimiter(redis_client)
+stream_limiter = StreamLimiter(
+    redis_client,
+    default_limit=settings.max_concurrent_streams_per_user
+)
 
 
 def get_or_create_conversation(
@@ -121,6 +134,21 @@ async def chat(
             headers={"X-RateLimit-Limit": str(user.rate_limit), "X-RateLimit-Remaining": "0"}
         )
 
+    # Check concurrent stream limit
+    if not stream_limiter.can_start_stream(str(user.id)):
+        current_streams = stream_limiter.get_active_stream_count(str(user.id))
+        logger.warning(
+            "stream_limit_exceeded",
+            user_id=str(user.id),
+            current_streams=current_streams,
+            max_streams=settings.max_concurrent_streams_per_user
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many concurrent streams. Maximum: {settings.max_concurrent_streams_per_user}",
+            headers={"X-Stream-Limit": str(settings.max_concurrent_streams_per_user)}
+        )
+
     logger.info(
         "chat_request_received",
         user_id=str(user.id),
@@ -137,14 +165,23 @@ async def chat(
 
     # Assign experiment variant
     experiment_service = ExperimentService(db)
-    variant = experiment_service.assign_variant(
-        str(user.id),
-        "prompt_experiment_jan2024"
+
+    # Get experiment key from config or auto-select from DB
+    experiment_key = experiment_service.get_experiment_key_for_chat(
+        settings.active_experiment_key
     )
+
+    if experiment_key:
+        variant = experiment_service.assign_variant(str(user.id), experiment_key)
+    else:
+        # No active experiments - use control
+        variant = "control"
+        experiment_key = None
 
     logger.info(
         "experiment_variant_assigned",
         user_id=str(user.id),
+        experiment_key=experiment_key,
         variant=variant
     )
 
@@ -182,80 +219,124 @@ async def chat(
         message_count=len(messages)
     )
 
-    # Stream response
+    # Register stream for backpressure tracking
+    user_id_str = str(user.id)
+    stream_id = stream_limiter.register_stream(user_id_str)
+
+    # Stream response with timeout and cleanup
     async def event_stream():
         full_content = ""
         metadata = {}
+        stream_cancelled = False
 
         try:
-            logger.info("llm_call_started", model="gpt-3.5-turbo", message_count=len(messages))
+            logger.info(
+                "llm_call_started",
+                model="gpt-3.5-turbo",
+                message_count=len(messages),
+                stream_id=stream_id
+            )
 
-            async for token, meta in llm_service.stream_chat(messages, model="gpt-3.5-turbo"):
-                if token:
-                    # Stream token to client
-                    full_content += token
-                    yield f"data: {json.dumps({'token': token})}\n\n"
-
-                if meta.get("done"):
-                    metadata = meta
-
-            # Create new database session for saving assistant message
-            # (original session from dependency injection is closed)
-            from app.database import SessionLocal
-            db_new = SessionLocal()
+            # Wrap LLM streaming with timeout
+            async def stream_with_timeout():
+                nonlocal full_content, metadata
+                async for token, meta in llm_service.stream_chat(messages, model="gpt-3.5-turbo"):
+                    if token:
+                        full_content += token
+                        yield token
+                    if meta.get("done"):
+                        metadata = meta
 
             try:
-                # Save assistant message with metadata
-                assistant_message = Message(
-                    conversation_id=conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content=metadata.get("full_content", full_content),
-                    experiment_variant=variant,
-                    model_name=metadata.get("model", "gpt-3.5-turbo"),
-                    prompt_version="v1",
-                    tokens_in=metadata.get("tokens_in"),
-                    tokens_out=metadata.get("tokens_out"),
-                    cost=metadata.get("cost"),
-                    latency_ms=metadata.get("latency_ms")
-                )
-                db_new.add(assistant_message)
-                db_new.commit()
-                db_new.refresh(assistant_message)
+                # Apply overall stream timeout
+                async with asyncio.timeout(settings.stream_timeout_seconds):
+                    async for token in stream_with_timeout():
+                        yield f"data: {json.dumps({'token': token})}\n\n"
 
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "stream_timeout",
+                    stream_id=stream_id,
+                    timeout_seconds=settings.stream_timeout_seconds,
+                    content_length=len(full_content)
+                )
+                yield f"data: {json.dumps({'error': 'Stream timeout exceeded', 'partial_content': True})}\n\n"
+                stream_cancelled = True
+
+            except asyncio.CancelledError:
+                # Client disconnected
                 logger.info(
-                    "llm_call_completed",
-                    message_id=str(assistant_message.id),
-                    tokens_in=metadata.get("tokens_in"),
-                    tokens_out=metadata.get("tokens_out"),
-                    latency_ms=metadata.get("latency_ms"),
-                    cost=metadata.get("cost")
+                    "stream_client_disconnected",
+                    stream_id=stream_id,
+                    content_length=len(full_content)
                 )
+                stream_cancelled = True
+                raise
 
-                # Send final metadata to client
-                final_data = {
-                    "done": True,
-                    "message_id": str(assistant_message.id),
-                    "conversation_id": conversation_id,
-                    "variant": variant,
-                    "model": metadata.get("model", "gpt-3.5-turbo"),
-                    "tokens_in": metadata.get("tokens_in"),
-                    "tokens_out": metadata.get("tokens_out"),
-                    "latency_ms": metadata.get("latency_ms"),
-                    "cost": metadata.get("cost")
-                }
-                yield f"data: {json.dumps(final_data)}\n\n"
+            # Save message if stream completed (even partially)
+            if full_content and not stream_cancelled:
+                from app.database import SessionLocal
+                db_new = SessionLocal()
 
-            finally:
-                db_new.close()
+                try:
+                    assistant_message = Message(
+                        conversation_id=conversation_id,
+                        role=MessageRole.ASSISTANT,
+                        content=metadata.get("full_content", full_content),
+                        experiment_variant=variant,
+                        model_name=metadata.get("model", "gpt-3.5-turbo"),
+                        prompt_version="v1",
+                        tokens_in=metadata.get("tokens_in"),
+                        tokens_out=metadata.get("tokens_out"),
+                        cost=metadata.get("cost"),
+                        latency_ms=metadata.get("latency_ms")
+                    )
+                    db_new.add(assistant_message)
+                    db_new.commit()
+                    db_new.refresh(assistant_message)
+
+                    logger.info(
+                        "llm_call_completed",
+                        message_id=str(assistant_message.id),
+                        stream_id=stream_id,
+                        tokens_in=metadata.get("tokens_in"),
+                        tokens_out=metadata.get("tokens_out"),
+                        latency_ms=metadata.get("latency_ms"),
+                        cost=metadata.get("cost")
+                    )
+
+                    final_data = {
+                        "done": True,
+                        "message_id": str(assistant_message.id),
+                        "conversation_id": conversation_id,
+                        "variant": variant,
+                        "model": metadata.get("model", "gpt-3.5-turbo"),
+                        "tokens_in": metadata.get("tokens_in"),
+                        "tokens_out": metadata.get("tokens_out"),
+                        "latency_ms": metadata.get("latency_ms"),
+                        "cost": metadata.get("cost")
+                    }
+                    yield f"data: {json.dumps(final_data)}\n\n"
+
+                finally:
+                    db_new.close()
+
+        except asyncio.CancelledError:
+            logger.info("stream_cancelled", stream_id=stream_id)
+            raise
 
         except Exception as e:
             logger.error(
                 "llm_call_failed",
+                stream_id=stream_id,
                 error=str(e),
                 error_type=type(e).__name__
             )
-            # Send error to client
             yield f"data: {json.dumps({'error': 'Failed to get response from LLM'})}\n\n"
+
+        finally:
+            # Always unregister stream on completion/error/cancel
+            stream_limiter.unregister_stream(user_id_str, stream_id)
 
     # Set rate limit headers
     remaining = rate_limiter.get_remaining(str(user.id), user.rate_limit, settings.rate_limit_window)

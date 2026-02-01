@@ -34,12 +34,8 @@ async def initialize_database():
         # Create test user with API key
         test_api_key = "test-key-123"
 
-        try:
-            api_key_hash = hash_api_key(test_api_key)
-        except Exception as e:
-            # Fallback to SHA256 if bcrypt fails
-            import hashlib
-            api_key_hash = hashlib.sha256(test_api_key.encode()).hexdigest()
+        # Hash using SHA256 (deterministic, allows direct DB lookup)
+        api_key_hash = hash_api_key(test_api_key)
 
         user = User(
             api_key_hash=api_key_hash,

@@ -79,6 +79,56 @@ def test_nonexistent_experiment_returns_control(db: Session):
     assert variant == "control", "Nonexistent experiment should return control"
 
 
+def test_variant_ordering_is_stable(db: Session):
+    """Test that variant assignment is stable regardless of dict ordering.
+
+    PostgreSQL JSONB does not preserve insertion order, so variants
+    might be returned in any order. The service must sort them to ensure
+    consistent assignment across environments.
+    """
+    # Create experiment with variants in specific order
+    experiment = Experiment(
+        key="test_order",
+        description="Test ordering stability",
+        variants={"zebra": 33, "alpha": 34, "middle": 33},  # Not alphabetical
+        active=True
+    )
+    db.add(experiment)
+    db.commit()
+
+    service = ExperimentService(db)
+
+    # Test many users and record assignments
+    assignments_run1 = {}
+    for i in range(100):
+        variant = service.assign_variant(f"user_{i}", "test_order")
+        assignments_run1[f"user_{i}"] = variant
+
+    # Simulate what would happen if JSONB returned variants in different order
+    # by creating a new experiment with same weights but different insertion order
+    db.delete(experiment)
+    db.commit()
+
+    experiment2 = Experiment(
+        key="test_order",
+        description="Test ordering stability",
+        variants={"middle": 33, "zebra": 33, "alpha": 34},  # Different order, same weights
+        active=True
+    )
+    db.add(experiment2)
+    db.commit()
+
+    # Run again - should get identical assignments because we sort by key
+    assignments_run2 = {}
+    for i in range(100):
+        variant = service.assign_variant(f"user_{i}", "test_order")
+        assignments_run2[f"user_{i}"] = variant
+
+    # Verify assignments are identical
+    assert assignments_run1 == assignments_run2, \
+        "Variant assignment must be stable regardless of dict ordering"
+
+
 @pytest.fixture
 def db():
     """Create test database session."""

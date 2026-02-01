@@ -24,12 +24,8 @@ def init_database():
         test_api_key = "test-key-123"  # Shorter key for testing
         print(f"\nCreating test user with API key: {test_api_key}")
 
-        try:
-            api_key_hash = hash_api_key(test_api_key)
-        except Exception as e:
-            print(f"Warning: Bcrypt error, using simple hash instead: {e}")
-            import hashlib
-            api_key_hash = hashlib.sha256(test_api_key.encode()).hexdigest()
+        # Hash using SHA256 (deterministic, allows direct DB lookup)
+        api_key_hash = hash_api_key(test_api_key)
 
         user = User(
             api_key_hash=api_key_hash,
