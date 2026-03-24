@@ -3,7 +3,7 @@
  */
 
 import type { ApiKeyInfo } from '../types';
-import { API_BASE, apiHeaders, getApiKey } from './config';
+import { API_BASE, apiHeaders } from './config';
 
 export async function getKeyInfo(): Promise<ApiKeyInfo> {
   const res = await fetch(`${API_BASE}/api-keys/me`, { headers: apiHeaders() });
