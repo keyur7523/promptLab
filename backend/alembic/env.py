@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.database import Base
 from app.config import get_settings
-from app.models import User, Conversation, Message, Feedback, Experiment
+from app.models import User, Conversation, Message, Feedback, Experiment, PromptVersion
 
 # this is the Alembic Config object
 config = context.config

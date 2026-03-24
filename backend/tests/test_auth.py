@@ -88,7 +88,7 @@ def db():
     """Create test database session."""
     from app.database import SessionLocal, engine, Base
 
-    # Create tables
+    # Tests use create_all (not Alembic) since they run against SQLite
     Base.metadata.create_all(bind=engine)
 
     # Create session

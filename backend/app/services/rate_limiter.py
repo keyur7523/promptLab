@@ -1,6 +1,6 @@
 """Rate limiting service using Redis."""
 import redis
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple
 
 
@@ -19,9 +19,9 @@ class RateLimiter:
         """
         Check if request is within rate limit.
 
-        Uses fixed window algorithm:
-        - Window resets every `window` seconds
-        - Allows up to `limit` requests per window
+        Uses fixed window algorithm with atomic INCR-first to avoid TOCTOU races:
+        - Increment first, then check the returned value
+        - If over limit, the count is slightly inflated but never under-counted
 
         Args:
             key: Unique identifier (e.g., API key or user ID)
@@ -37,28 +37,20 @@ class RateLimiter:
             >>> if not allowed:
             >>>     raise HTTPException(429, "Rate limit exceeded")
         """
-        # Create time-based key (resets each window)
-        # Format: rate_limit:{key}:{YYYYMMDDHH} for hourly windows
         window_key = self._get_window_key(key, window)
 
-        # Get current count
-        current = self.redis.get(window_key)
-
-        if current and int(current) >= limit:
-            return False, int(current)
-
-        # Increment counter atomically
+        # Atomic increment-first: avoids TOCTOU race between GET and INCR
         pipe = self.redis.pipeline()
         pipe.incr(window_key)
         pipe.expire(window_key, window)
         results = pipe.execute()
 
-        new_count = results[0]
-        return new_count <= limit, new_count
+        current_count = results[0]
+        return current_count <= limit, current_count
 
     def _get_window_key(self, key: str, window: int) -> str:
         """Generate Redis key for current time window."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if window == 3600:  # 1 hour
             window_id = now.strftime('%Y%m%d%H')
@@ -74,7 +66,6 @@ class RateLimiter:
 
     def reset(self, key: str):
         """Reset rate limit for a key (useful for testing)."""
-        # Delete all keys matching pattern
         pattern = f"rate_limit:{key}:*"
         for redis_key in self.redis.scan_iter(match=pattern):
             self.redis.delete(redis_key)

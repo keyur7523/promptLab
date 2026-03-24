@@ -12,18 +12,19 @@ interface FeedbackButtonsProps {
 export default function FeedbackButtons({ messageId }: FeedbackButtonsProps) {
   const [voted, setVoted] = useState<1 | -1 | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleVote = async (rating: 1 | -1) => {
     if (voted || isSubmitting) return;
 
     setIsSubmitting(true);
+    setError(null);
 
     try {
       await submitFeedback(messageId, rating);
       setVoted(rating);
-    } catch (error) {
-      console.error('Failed to submit feedback:', error);
-      alert('Failed to submit feedback. Please try again.');
+    } catch (err) {
+      setError('Failed to submit feedback. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -36,6 +37,7 @@ export default function FeedbackButtons({ messageId }: FeedbackButtonsProps) {
         disabled={voted !== null || isSubmitting}
         className={`feedback-btn ${voted === 1 ? 'active' : ''}`}
         title="Thumbs up"
+        aria-label="Rate response as helpful"
       >
         👍
       </button>
@@ -44,10 +46,12 @@ export default function FeedbackButtons({ messageId }: FeedbackButtonsProps) {
         disabled={voted !== null || isSubmitting}
         className={`feedback-btn ${voted === -1 ? 'active' : ''}`}
         title="Thumbs down"
+        aria-label="Rate response as unhelpful"
       >
         👎
       </button>
       {voted && <span className="voted-text">Thanks for your feedback!</span>}
+      {error && <span className="feedback-error">{error}</span>}
     </div>
   );
 }

@@ -14,16 +14,16 @@ interface MessageListProps {
 export default function MessageList({ messages, showDevInfo }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when a new message is added (not on every token update)
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length]);
 
   return (
     <div className="message-list">
       {messages.length === 0 && (
         <div className="empty-state">
-          <h2>👋 Welcome to AI Chat</h2>
+          <h2>Welcome to PromptLab</h2>
           <p>Start a conversation by typing a message below.</p>
         </div>
       )}

@@ -58,6 +58,23 @@ services:
       - ./backend/.env
     restart: unless-stopped
 
+  # Rust Token Counter
+  token-counter:
+    build:
+      context: ./rust-token-counter
+      dockerfile: Dockerfile
+    container_name: ai-chat-token-counter
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
   # Frontend
   frontend:
     build:

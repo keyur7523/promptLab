@@ -1,6 +1,6 @@
 """Tests for stream limiting service."""
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from app.services.stream_limiter import StreamLimiter, StreamLimitExceeded
 
 
@@ -9,57 +9,42 @@ def mock_redis():
     """Create a mock Redis client."""
     redis_mock = MagicMock()
     redis_mock.scard.return_value = 0
-    redis_mock.pipeline.return_value = MagicMock()
+    redis_mock.eval.return_value = 1  # Default: acquire succeeds
     return redis_mock
 
 
-def test_can_start_stream_when_under_limit(mock_redis):
-    """Test that streams can start when under limit."""
-    mock_redis.scard.return_value = 2
+def test_try_acquire_stream_succeeds_under_limit(mock_redis):
+    """Test that stream acquisition succeeds when under limit."""
+    mock_redis.eval.return_value = 1
     limiter = StreamLimiter(mock_redis, default_limit=5)
 
-    assert limiter.can_start_stream("user_123") is True
-
-
-def test_cannot_start_stream_when_at_limit(mock_redis):
-    """Test that streams cannot start when at limit."""
-    mock_redis.scard.return_value = 5
-    limiter = StreamLimiter(mock_redis, default_limit=5)
-
-    assert limiter.can_start_stream("user_123") is False
-
-
-def test_cannot_start_stream_when_over_limit(mock_redis):
-    """Test that streams cannot start when over limit."""
-    mock_redis.scard.return_value = 10
-    limiter = StreamLimiter(mock_redis, default_limit=5)
-
-    assert limiter.can_start_stream("user_123") is False
-
-
-def test_register_stream_returns_unique_id(mock_redis):
-    """Test that register_stream returns a unique stream ID."""
-    pipe_mock = MagicMock()
-    mock_redis.pipeline.return_value = pipe_mock
-
-    limiter = StreamLimiter(mock_redis, default_limit=5)
-    stream_id = limiter.register_stream("user_123")
+    stream_id = limiter.try_acquire_stream("user_123")
 
     assert stream_id is not None
     assert len(stream_id) == 36  # UUID format
 
 
-def test_register_stream_adds_to_redis(mock_redis):
-    """Test that register_stream adds the stream to Redis."""
-    pipe_mock = MagicMock()
-    mock_redis.pipeline.return_value = pipe_mock
-
+def test_try_acquire_stream_fails_at_limit(mock_redis):
+    """Test that stream acquisition fails when at limit."""
+    mock_redis.eval.return_value = 0
     limiter = StreamLimiter(mock_redis, default_limit=5)
-    stream_id = limiter.register_stream("user_123")
 
-    pipe_mock.sadd.assert_called_once()
-    pipe_mock.expire.assert_called_once()
-    pipe_mock.execute.assert_called_once()
+    stream_id = limiter.try_acquire_stream("user_123")
+
+    assert stream_id is None
+
+
+def test_try_acquire_calls_lua_script(mock_redis):
+    """Test that try_acquire_stream uses the atomic Lua script."""
+    mock_redis.eval.return_value = 1
+    limiter = StreamLimiter(mock_redis, default_limit=5)
+
+    limiter.try_acquire_stream("user_123")
+
+    mock_redis.eval.assert_called_once()
+    args = mock_redis.eval.call_args
+    # Lua script is first arg, 1 key, then key name, limit, stream_id, ttl
+    assert args[0][1] == 1  # number of keys
 
 
 def test_unregister_stream_removes_from_redis(mock_redis):
@@ -80,24 +65,20 @@ def test_get_active_stream_count(mock_redis):
     assert count == 3
 
 
-def test_stream_context_registers_and_unregisters(mock_redis):
+def test_stream_context_acquires_and_unregisters(mock_redis):
     """Test that stream_context properly manages stream lifecycle."""
-    pipe_mock = MagicMock()
-    mock_redis.pipeline.return_value = pipe_mock
-    mock_redis.scard.return_value = 0
-
+    mock_redis.eval.return_value = 1
     limiter = StreamLimiter(mock_redis, default_limit=5)
 
     with limiter.stream_context("user_123") as stream_id:
         assert stream_id is not None
-        pipe_mock.sadd.assert_called_once()
 
     mock_redis.srem.assert_called_once()
 
 
 def test_stream_context_raises_when_limit_exceeded(mock_redis):
     """Test that stream_context raises when limit is exceeded."""
-    mock_redis.scard.return_value = 5
+    mock_redis.eval.return_value = 0
     limiter = StreamLimiter(mock_redis, default_limit=5)
 
     with pytest.raises(StreamLimitExceeded) as exc_info:
@@ -109,10 +90,7 @@ def test_stream_context_raises_when_limit_exceeded(mock_redis):
 
 def test_stream_context_unregisters_on_exception(mock_redis):
     """Test that stream_context unregisters even when exception occurs."""
-    pipe_mock = MagicMock()
-    mock_redis.pipeline.return_value = pipe_mock
-    mock_redis.scard.return_value = 0
-
+    mock_redis.eval.return_value = 1
     limiter = StreamLimiter(mock_redis, default_limit=5)
 
     with pytest.raises(ValueError):
@@ -125,11 +103,12 @@ def test_stream_context_unregisters_on_exception(mock_redis):
 
 def test_custom_limit_override(mock_redis):
     """Test that custom limits can override default."""
-    mock_redis.scard.return_value = 3
+    # First call: limit=3, should fail
+    mock_redis.eval.return_value = 0
     limiter = StreamLimiter(mock_redis, default_limit=5)
 
-    # Should fail with custom limit of 3
-    assert limiter.can_start_stream("user_123", limit=3) is False
+    assert limiter.try_acquire_stream("user_123", limit=3) is None
 
-    # Should pass with custom limit of 10
-    assert limiter.can_start_stream("user_123", limit=10) is True
+    # Second call: limit=10, should succeed
+    mock_redis.eval.return_value = 1
+    assert limiter.try_acquire_stream("user_123", limit=10) is not None

@@ -1,41 +1,51 @@
 """Setup endpoint for database initialization."""
-from fastapi import APIRouter, HTTPException
-from sqlalchemy.orm import Session
+import secrets
+import logging
 
-from app.database import SessionLocal, engine, Base
+from fastapi import APIRouter, HTTPException, Header
+from typing import Optional
+
+from app.database import SessionLocal
 from app.models import User, Experiment
 from app.middleware.auth import hash_api_key
+from app.config import get_settings
 
 router = APIRouter()
+settings = get_settings()
 
 
 @router.post("/setup/init-db")
-async def initialize_database():
+async def initialize_database(
+    x_bootstrap_token: Optional[str] = Header(None),
+):
     """
-    Initialize database tables and create initial data.
+    Initialize database and seed initial data.
 
-    This endpoint should only be called once after deployment.
-    Creates tables, test user, and sample experiment.
+    Requires tables to already exist (run `alembic upgrade head` first).
+    Protected by BOOTSTRAP_TOKEN env var — if set, the request must include
+    the matching X-Bootstrap-Token header.
+
+    Only callable when the database is empty (no existing users).
     """
-    db: Session = SessionLocal()
+    # Verify bootstrap token if configured
+    if settings.bootstrap_token:
+        if not x_bootstrap_token or x_bootstrap_token != settings.bootstrap_token:
+            raise HTTPException(status_code=403, detail="Invalid bootstrap token.")
+
+    db = SessionLocal()
 
     try:
-        # Create all tables
-        Base.metadata.create_all(bind=engine)
-
-        # Check if already initialized
+        # Tables must already exist via Alembic — don't create_all here
         existing_user = db.query(User).first()
         if existing_user:
-            return {
-                "status": "already_initialized",
-                "message": "Database already has data. Skipping initialization."
-            }
+            raise HTTPException(
+                status_code=409,
+                detail="Database already initialized."
+            )
 
-        # Create test user with API key
-        test_api_key = "test-key-123"
-
-        # Hash using SHA256 (deterministic, allows direct DB lookup)
-        api_key_hash = hash_api_key(test_api_key)
+        # Generate a secure random API key
+        generated_api_key = f"pk-{secrets.token_urlsafe(32)}"
+        api_key_hash = hash_api_key(generated_api_key)
 
         user = User(
             api_key_hash=api_key_hash,
@@ -47,7 +57,7 @@ async def initialize_database():
 
         # Create sample experiment
         experiment = Experiment(
-            key="prompt_experiment_jan2024",
+            key="prompt_experiment_v1",
             description="Test concise vs detailed prompts",
             variants={
                 "control": 34,
@@ -63,16 +73,19 @@ async def initialize_database():
             "status": "success",
             "message": "Database initialized successfully",
             "user_id": str(user.id),
-            "api_key": test_api_key,
+            "api_key": generated_api_key,
             "experiment": experiment.key,
             "note": "Save your API key! This is the only time it will be shown."
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         db.rollback()
+        logging.exception("Database initialization failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Database initialization failed: {str(e)}"
+            detail="Database initialization failed. Check server logs for details."
         )
     finally:
         db.close()

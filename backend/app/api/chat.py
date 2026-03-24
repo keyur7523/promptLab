@@ -26,6 +26,7 @@ from app.services.experiments import ExperimentService
 from app.services.rate_limiter import RateLimiter
 from app.services.stream_limiter import StreamLimiter, StreamLimitExceeded
 from app.services.token_counter import get_token_counter
+from app.models.prompt_version import PromptVersion
 from app.config import get_settings
 
 router = APIRouter()
@@ -90,14 +91,32 @@ def get_conversation_history(db: Session, conversation_id: str, limit: int = 10)
     ]
 
 
-def get_prompt_for_variant(variant: str) -> str:
-    """Get system prompt based on experiment variant."""
-    prompts = {
+def get_prompt_for_variant(variant: str, db: Session) -> tuple[str, str]:
+    """
+    Get system prompt for an experiment variant.
+
+    Queries the prompt_versions table for the active version first.
+    Falls back to hardcoded defaults if no DB version exists.
+
+    Returns:
+        Tuple of (prompt_content, version_label)
+    """
+    # Try database first
+    active_prompt = (
+        db.query(PromptVersion)
+        .filter(PromptVersion.variant == variant, PromptVersion.is_active == True)
+        .first()
+    )
+    if active_prompt:
+        return active_prompt.content, f"v{active_prompt.version}"
+
+    # Hardcoded fallback for backwards compatibility
+    defaults = {
         "control": "You are a helpful AI assistant. Provide detailed and informative responses.",
         "concise": "You are a helpful AI assistant. Be concise and to the point.",
         "friendly": "You are a friendly and enthusiastic AI assistant. Be warm and encouraging!",
     }
-    return prompts.get(variant, prompts["control"])
+    return defaults.get(variant, defaults["control"]), "v0"
 
 
 @router.post("/chat")
@@ -134,8 +153,9 @@ async def chat(
             headers={"X-RateLimit-Limit": str(user.rate_limit), "X-RateLimit-Remaining": "0"}
         )
 
-    # Check concurrent stream limit
-    if not stream_limiter.can_start_stream(str(user.id)):
+    # Atomically acquire a stream slot (avoids TOCTOU race)
+    stream_id = stream_limiter.try_acquire_stream(str(user.id))
+    if stream_id is None:
         current_streams = stream_limiter.get_active_stream_count(str(user.id))
         logger.warning(
             "stream_limit_exceeded",
@@ -185,8 +205,8 @@ async def chat(
         variant=variant
     )
 
-    # Build prompt based on variant
-    system_prompt = get_prompt_for_variant(variant)
+    # Build prompt based on variant (DB-backed with fallback)
+    system_prompt, prompt_version = get_prompt_for_variant(variant, db)
 
     # Get conversation history
     history = get_conversation_history(db, str(conversation.id))
@@ -212,16 +232,15 @@ async def chat(
     conversation_id = str(conversation.id)
 
     # Pre-estimate tokens (demonstrates Rust integration)
-    estimated_tokens = await llm_service.pre_estimate_tokens(messages, "gpt-3.5-turbo")
+    estimated_tokens = await llm_service.pre_estimate_tokens(messages, settings.llm_model)
     logger.info(
         "pre_estimated_tokens",
         estimated_tokens=estimated_tokens,
         message_count=len(messages)
     )
 
-    # Register stream for backpressure tracking
+    # Stream was already acquired atomically above
     user_id_str = str(user.id)
-    stream_id = stream_limiter.register_stream(user_id_str)
 
     # Stream response with timeout and cleanup
     async def event_stream():
@@ -232,7 +251,7 @@ async def chat(
         try:
             logger.info(
                 "llm_call_started",
-                model="gpt-3.5-turbo",
+                model=settings.llm_model,
                 message_count=len(messages),
                 stream_id=stream_id
             )
@@ -240,7 +259,7 @@ async def chat(
             # Wrap LLM streaming with timeout
             async def stream_with_timeout():
                 nonlocal full_content, metadata
-                async for token, meta in llm_service.stream_chat(messages, model="gpt-3.5-turbo"):
+                async for token, meta in llm_service.stream_chat(messages, model=settings.llm_model):
                     if token:
                         full_content += token
                         yield token
@@ -284,8 +303,8 @@ async def chat(
                         role=MessageRole.ASSISTANT,
                         content=metadata.get("full_content", full_content),
                         experiment_variant=variant,
-                        model_name=metadata.get("model", "gpt-3.5-turbo"),
-                        prompt_version="v1",
+                        model_name=metadata.get("model", settings.llm_model),
+                        prompt_version=prompt_version,
                         tokens_in=metadata.get("tokens_in"),
                         tokens_out=metadata.get("tokens_out"),
                         cost=metadata.get("cost"),
@@ -310,7 +329,7 @@ async def chat(
                         "message_id": str(assistant_message.id),
                         "conversation_id": conversation_id,
                         "variant": variant,
-                        "model": metadata.get("model", "gpt-3.5-turbo"),
+                        "model": metadata.get("model", settings.llm_model),
                         "tokens_in": metadata.get("tokens_in"),
                         "tokens_out": metadata.get("tokens_out"),
                         "latency_ms": metadata.get("latency_ms"),

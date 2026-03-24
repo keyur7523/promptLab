@@ -15,9 +15,7 @@ redis==5.0.1
 openai==1.10.0
 
 # Auth & Security
-# Note: API keys use SHA256 (stdlib hashlib) - no external deps needed
-# python-jose kept for potential future JWT support
-python-jose[cryptography]==3.3.0
+# API keys use SHA256 (stdlib hashlib) - no external deps needed
 
 # Environment
 python-dotenv==1.0.0

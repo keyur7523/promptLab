@@ -3,9 +3,7 @@
  */
 
 import type { FeedbackRequest } from '../types';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key-12345';
+import { API_BASE, getApiKey } from './config';
 
 /**
  * Submit feedback (thumbs up/down) for an assistant message.
@@ -23,7 +21,7 @@ export async function submitFeedback(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
+      'x-api-key': getApiKey(),
     },
     body: JSON.stringify({
       message_id: messageId,

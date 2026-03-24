@@ -9,5 +9,5 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/token-counter /token-counter
-ENV PORT=8080
+ENV PORT=3001
 CMD ["/token-counter"]

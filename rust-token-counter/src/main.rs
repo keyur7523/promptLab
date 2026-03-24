@@ -21,7 +21,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 /// Model pricing configuration (USD per 1K tokens)
-/// Updated: January 2024
+/// Approximate pricing per 1K tokens (USD)
 struct ModelPricing {
     input: f64,
     output: f64,
@@ -45,13 +45,18 @@ fn get_model_pricing() -> HashMap<&'static str, ModelPricing> {
     pricing.insert("gpt-4-1106-preview", ModelPricing { input: 0.01, output: 0.03 });
 
     // GPT-4o
-    pricing.insert("gpt-4o", ModelPricing { input: 0.005, output: 0.015 });
+    pricing.insert("gpt-4o", ModelPricing { input: 0.0025, output: 0.01 });
     pricing.insert("gpt-4o-mini", ModelPricing { input: 0.00015, output: 0.0006 });
 
+    // o1 / o3 reasoning models
+    pricing.insert("o1", ModelPricing { input: 0.015, output: 0.06 });
+    pricing.insert("o1-mini", ModelPricing { input: 0.003, output: 0.012 });
+    pricing.insert("o3-mini", ModelPricing { input: 0.0011, output: 0.0044 });
+
     // Claude models (for future provider support)
-    pricing.insert("claude-3-opus", ModelPricing { input: 0.015, output: 0.075 });
-    pricing.insert("claude-3-sonnet", ModelPricing { input: 0.003, output: 0.015 });
-    pricing.insert("claude-3-haiku", ModelPricing { input: 0.00025, output: 0.00125 });
+    pricing.insert("claude-sonnet-4-20250514", ModelPricing { input: 0.003, output: 0.015 });
+    pricing.insert("claude-3-5-sonnet-20241022", ModelPricing { input: 0.003, output: 0.015 });
+    pricing.insert("claude-3-5-haiku-20241022", ModelPricing { input: 0.0008, output: 0.004 });
 
     pricing
 }

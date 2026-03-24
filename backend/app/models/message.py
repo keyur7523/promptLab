@@ -2,7 +2,7 @@
 from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum as SQLEnum, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import enum
 
@@ -37,7 +37,7 @@ class Message(Base):
     cost = Column(Numeric(10, 6))  # USD
     latency_ms = Column(Integer)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")

@@ -47,7 +47,7 @@ services:
       - key: VITE_API_URL
         value: https://ai-chat-backend.onrender.com
       - key: VITE_API_KEY
-        value: test-api-key-12345  # Change after deployment
+        value: CHANGE_ME_AFTER_INIT  # Run /setup/init-db to generate a real key
 
 databases:
   # PostgreSQL Database

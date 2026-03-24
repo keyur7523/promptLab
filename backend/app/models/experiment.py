@@ -1,7 +1,7 @@
 """Experiment model."""
 from sqlalchemy import Column, String, Text, Boolean, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from app.database import Base
@@ -17,7 +17,7 @@ class Experiment(Base):
     description = Column(Text)
     variants = Column(JSONB, nullable=False)  # {"control": 50, "variant_a": 30, "variant_b": 20}
     active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     def __repr__(self):
         return f"<Experiment {self.key} active={self.active}>"

@@ -103,7 +103,6 @@ async def get_feedback_stats(
 
     Returns aggregated stats by experiment variant.
     """
-    # This is a simple example - in production you'd want more sophisticated analytics
     from sqlalchemy import func
 
     stats = db.query(

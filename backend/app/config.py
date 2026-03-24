@@ -18,13 +18,11 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str
+    llm_model: str = "gpt-3.5-turbo"
 
     # Rate Limiting
     rate_limit_requests: int = 100
     rate_limit_window: int = 3600  # seconds (1 hour)
-
-    # API Keys (for initial setup)
-    admin_api_key: str = "admin-key-change-in-production"
 
     # CORS
     frontend_url: str = "http://localhost:5173"
@@ -37,6 +35,9 @@ class Settings(BaseSettings):
     max_concurrent_streams_per_user: int = 5  # Max simultaneous streams per user
     stream_timeout_seconds: int = 120  # Max duration for a single stream
     llm_response_timeout_seconds: int = 60  # Timeout for LLM provider response
+
+    # Bootstrap token for /setup/init-db (required to initialize the database)
+    bootstrap_token: str = ""
 
     # Rust Token Counter Service
     token_counter_url: str = "http://localhost:3001"

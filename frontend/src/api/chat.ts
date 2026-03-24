@@ -3,9 +3,7 @@
  */
 
 import type { StreamMetadata } from '../types';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_KEY = import.meta.env.VITE_API_KEY || 'test-api-key-12345';
+import { API_BASE, getApiKey } from './config';
 
 export interface StreamResult {
   token?: string;
@@ -18,11 +16,13 @@ export interface StreamResult {
  *
  * @param message - User message
  * @param conversationId - Optional conversation ID for context
+ * @param signal - Optional AbortSignal for cancellation
  * @yields Stream results containing tokens or metadata
  *
  * @example
  * ```ts
- * for await (const result of streamChat("Hello!", conversationId)) {
+ * const controller = new AbortController();
+ * for await (const result of streamChat("Hello!", conversationId, controller.signal)) {
  *   if (result.token) {
  *     console.log(result.token);
  *   } else if (result.metadata) {
@@ -33,18 +33,20 @@ export interface StreamResult {
  */
 export async function* streamChat(
   message: string,
-  conversationId?: string
+  conversationId?: string,
+  signal?: AbortSignal
 ): AsyncGenerator<StreamResult> {
   const response = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
+      'x-api-key': getApiKey(),
     },
     body: JSON.stringify({
       message,
       conversation_id: conversationId,
     }),
+    signal,
   });
 
   if (!response.ok) {
@@ -91,8 +93,8 @@ export async function* streamChat(
               yield { metadata: data as StreamMetadata };
               return;
             }
-          } catch (e) {
-            console.error('Failed to parse SSE data:', e);
+          } catch {
+            // Skip malformed SSE data lines
           }
         }
       }

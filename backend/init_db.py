@@ -1,5 +1,6 @@
 """Initialize database with sample data."""
 import sys
+import secrets
 from sqlalchemy.orm import Session
 from app.database import SessionLocal, engine, Base
 from app.models import User, Experiment
@@ -17,15 +18,12 @@ def init_database():
         # Check if user already exists
         existing_user = db.query(User).first()
         if existing_user:
-            print("✓ Database already initialized")
+            print("Database already initialized")
             return
 
-        # Create test user with API key
-        test_api_key = "test-key-123"  # Shorter key for testing
-        print(f"\nCreating test user with API key: {test_api_key}")
-
-        # Hash using SHA256 (deterministic, allows direct DB lookup)
-        api_key_hash = hash_api_key(test_api_key)
+        # Generate a secure random API key
+        api_key = f"pk-{secrets.token_urlsafe(32)}"
+        api_key_hash = hash_api_key(api_key)
 
         user = User(
             api_key_hash=api_key_hash,
@@ -33,12 +31,12 @@ def init_database():
         )
         db.add(user)
         db.commit()
-        print(f"✓ Created user with ID: {user.id}")
+        print(f"Created user with ID: {user.id}")
 
         # Create sample experiment
-        print("\nCreating sample experiment...")
+        print("Creating sample experiment...")
         experiment = Experiment(
-            key="prompt_experiment_jan2024",
+            key="prompt_experiment_v1",
             description="Test concise vs detailed prompts",
             variants={
                 "control": 34,
@@ -49,18 +47,25 @@ def init_database():
         )
         db.add(experiment)
         db.commit()
-        print(f"✓ Created experiment: {experiment.key}")
+        print(f"Created experiment: {experiment.key}")
 
-        print("\n" + "="*50)
-        print("✓ Database initialized successfully!")
-        print("="*50)
-        print(f"\nTest API Key: {test_api_key}")
-        print("Use this key in the frontend or with curl:")
-        print(f'  curl -H "x-api-key: {test_api_key}" http://localhost:8000/health')
-        print("\n" + "="*50)
+        print()
+        print("=" * 50)
+        print("Database initialized successfully!")
+        print("=" * 50)
+        print()
+        print(f"API Key: {api_key}")
+        print("Save this key! It will not be shown again.")
+        print()
+        print("Use this key in the frontend .env:")
+        print(f"  VITE_API_KEY={api_key}")
+        print()
+        print("Or with curl:")
+        print(f'  curl -H "x-api-key: {api_key}" http://localhost:8000/health')
+        print("=" * 50)
 
     except Exception as e:
-        print(f"✗ Error initializing database: {e}")
+        print(f"Error initializing database: {e}")
         db.rollback()
         sys.exit(1)
     finally:

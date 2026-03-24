@@ -341,13 +341,14 @@ The Python backend also has a built-in keep-alive that pings the Rust token coun
 - CORS configuration
 - Structured error logging
 
-## Future Enhancements
+## Completed Enhancements
 
-- [ ] Sliding window rate limiter
-- [ ] Response caching for common queries
-- [ ] Analytics dashboard
-- [ ] API key rotation
-- [ ] Horizontal scaling with K8s
+- [x] Analytics dashboard with experiment metrics
+- [x] API key rotation and management
+- [x] Experiment management UI
+- [x] Prompt version registry with diff viewer
+- [x] Conversation history and resume
+- [x] CSV data export
 
 ## Tech Stack
 
