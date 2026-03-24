@@ -9,12 +9,17 @@ This is not a chatbot. It is infrastructure for controlled prompt experimentatio
 PromptLab demonstrates the core components of production AI infrastructure:
 
 - **Real-time streaming** via Server-Sent Events (SSE)
-- **A/B experimentation framework** with deterministic variant assignment
-- **Feedback pipeline** for continuous improvement (👍/👎)
-- **Rate limiting** (100 req/hour per user) and **API key authentication**
+- **A/B experimentation framework** with deterministic variant assignment and management UI
+- **Prompt version registry** with database-backed versioning, rollback, and diff viewer
+- **Analytics dashboard** with usage charts, latency distribution, and experiment comparison
+- **Feedback pipeline** for continuous improvement (thumbs up/down)
+- **Conversation history** with sidebar navigation and resume
+- **API key management** with rotation, generation, and runtime key switching
+- **Rate limiting** (100 req/hour per user) with atomic Redis operations
 - **Structured logging** with correlation IDs for observability
+- **CSV export** of experiment results and conversation transcripts
 - **PostgreSQL** for persistence, **Redis** for caching/rate-limiting
-- **Full-stack implementation** with React + TypeScript frontend
+- **Full-stack implementation** with React + TypeScript + React Router frontend
 
 ## Why PromptLab Exists
 
@@ -129,11 +134,12 @@ See `rust-token-counter/README.md` for architecture details and why Rust was cho
 ## Database Schema
 
 ### Core Tables
-- **users**: API keys, rate limits
-- **conversations**: Chat sessions
-- **messages**: Full message history with experiment metadata
-- **feedback**: Thumbs up/down ratings
-- **experiments**: A/B test configurations
+- **users**: API keys (SHA256 hashed), rate limits
+- **conversations**: Chat sessions per user
+- **messages**: Full message history with experiment metadata, token counts, cost, latency
+- **feedback**: Thumbs up/down ratings per message
+- **experiments**: A/B test configurations with variant weights
+- **prompt_versions**: Versioned system prompts per variant with active flag
 
 ## Local Development
 
@@ -181,7 +187,7 @@ createdb ai_chat
 
 # Run migrations and seed data
 python init_db.py
-# This creates test user with API key: test-key-123
+# This generates a random API key — save the output!
 ```
 
 4. **Start Rust token counter (optional):**
@@ -207,7 +213,7 @@ npm install
 
 # Copy and configure .env
 cp .env.example .env
-# Edit .env: Set VITE_API_KEY=test-key-123
+# Edit .env: Set VITE_API_KEY=<your-key-from-init_db>
 
 npm run dev
 # Frontend running at http://localhost:5173
@@ -222,7 +228,7 @@ npm run dev
 
 ### Test Chat API
 ```bash
-curl -N -H "x-api-key: test-key-123" \
+curl -N -H "x-api-key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"message": "Tell me about transformers"}' \
   http://localhost:8000/chat
@@ -230,7 +236,7 @@ curl -N -H "x-api-key: test-key-123" \
 
 ### Test Feedback
 ```bash
-curl -H "x-api-key: test-key-123" \
+curl -H "x-api-key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"message_id": "<message-id>", "rating": 1}' \
   http://localhost:8000/feedback
@@ -238,7 +244,7 @@ curl -H "x-api-key: test-key-123" \
 
 ### Check Experiment Stats
 ```bash
-curl -H "x-api-key: test-key-123" \
+curl -H "x-api-key: YOUR_API_KEY" \
   http://localhost:8000/feedback/stats
 ```
 
@@ -302,7 +308,7 @@ vercel
    - Vercel Dashboard → Settings → Environment Variables
    ```
    VITE_API_URL=https://your-backend.onrender.com
-   VITE_API_KEY=test-key-123
+   VITE_API_KEY=<your-key-from-init_db>
    ```
 
 4. **Redeploy:**
@@ -327,19 +333,24 @@ The Python backend also has a built-in keep-alive that pings the Rust token coun
 
 ## What This Demonstrates
 
-✅ **Consumer-scale backend design** - Rate limiting, streaming, cost tracking
-✅ **Experimentation infrastructure** - A/B testing for continuous improvement
-✅ **High-throughput data pipelines** - Structured logging ready for analytics
-✅ **Reliability thinking** - Health checks, error handling, observability
-✅ **End-to-end ownership** - Backend, frontend, database, DevOps
+- **Consumer-scale backend design** — Rate limiting, streaming, cost tracking, security headers
+- **Experimentation infrastructure** — A/B testing with management UI, prompt versioning, rollback
+- **Data-driven product thinking** — Analytics dashboard, CSV export, feedback pipeline
+- **High-throughput data pipelines** — Structured logging, correlation IDs, observability
+- **Reliability thinking** — Health checks, atomic operations, graceful fallbacks, CI/CD
+- **End-to-end ownership** — Backend, frontend, Rust sidecar, database, DevOps
 
 ## Security Features
 
-- API key authentication (bcrypt hashing with SHA256 fallback)
-- Rate limiting (100 req/hour per user)
+- API key authentication (SHA256 hashing with indexed lookup)
+- Rate limiting (100 req/hour per user, atomic Redis INCR)
+- Concurrent stream limiting (Lua-based atomic slot acquisition)
 - Input validation (Pydantic schemas)
-- CORS configuration
-- Structured error logging
+- Security headers (X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy)
+- Request body size limit (1MB)
+- CORS configuration (debug-only localhost origins)
+- Bootstrap token protection for database initialization
+- Structured error logging (no internal details leaked to clients)
 
 ## Completed Enhancements
 
@@ -362,15 +373,18 @@ The Python backend also has a built-in keep-alive that pings the Rust token coun
 - Rust token counter (high-performance tokenization)
 
 **Frontend:**
-- React 18
-- TypeScript
+- React 18 with React Router
+- TypeScript (strict mode)
 - Vite (build tool)
+- Recharts (analytics visualizations)
 - SSE for streaming
 
 **DevOps:**
+- GitHub Actions CI (Python tests, TypeScript checks, Rust tests, Docker builds)
 - Render (backend hosting)
 - Vercel (frontend hosting)
-- Docker Compose (local dev)
+- Docker Compose (local dev with all services)
+- Multi-stage Dockerfiles (nginx for frontend, slim for backend/Rust)
 
 ## Scale Thought Experiment
 
