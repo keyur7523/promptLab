@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.middleware.logging import LoggingMiddleware
 from app.api import chat, feedback, health, setup, analytics, experiments, conversations, prompts, api_keys, export
 from app.services.token_counter import close_token_counter
+from app.database import engine, Base
 
 settings = get_settings()
 
@@ -36,8 +37,8 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown."""
     global keep_alive_task
 
-    # Startup — tables are managed by Alembic migrations.
-    # Use `alembic upgrade head` before first run.
+    # Startup — ensure all tables exist (safe: checkfirst=True is default)
+    Base.metadata.create_all(bind=engine)
     logging.info("PromptLab starting up")
 
     # Start keep-alive task for Render free tier
