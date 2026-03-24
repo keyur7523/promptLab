@@ -13,15 +13,18 @@ router = APIRouter()
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Shared Redis client for health checks (avoids creating a new connection per request)
+# Shared Redis client for health checks
 _redis_client: redis.Redis | None = None
 
 
-def _get_redis_client() -> redis.Redis:
+def _get_redis_client() -> redis.Redis | None:
     """Get or create a shared Redis client for health checks."""
     global _redis_client
-    if _redis_client is None:
-        _redis_client = redis.from_url(settings.redis_url)
+    if _redis_client is None and settings.redis_url:
+        try:
+            _redis_client = redis.from_url(settings.redis_url)
+        except Exception:
+            pass
     return _redis_client
 
 
@@ -40,7 +43,7 @@ async def detailed_health_check(db: Session = Depends(get_db)):
     checks = {
         "api": "healthy",
         "database": "unknown",
-        "redis": "unknown"
+        "redis": "not configured" if not settings.redis_url else "unknown",
     }
 
     # Check database
@@ -51,17 +54,19 @@ async def detailed_health_check(db: Session = Depends(get_db)):
         logger.warning("Health check: database unhealthy: %s", e)
         checks["database"] = "unhealthy"
 
-    # Check Redis (uses shared client)
-    try:
-        _get_redis_client().ping()
-        checks["redis"] = "healthy"
-    except Exception as e:
-        logger.warning("Health check: redis unhealthy: %s", e)
-        checks["redis"] = "unhealthy"
+    # Check Redis (optional)
+    client = _get_redis_client()
+    if client:
+        try:
+            client.ping()
+            checks["redis"] = "healthy"
+        except Exception as e:
+            logger.warning("Health check: redis unhealthy: %s", e)
+            checks["redis"] = "unhealthy"
 
     # Overall status
     overall_status = "healthy" if all(
-        v == "healthy" for v in checks.values()
+        v in ("healthy", "not configured") for v in checks.values()
     ) else "degraded"
 
     return {

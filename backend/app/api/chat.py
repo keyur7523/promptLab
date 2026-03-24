@@ -43,12 +43,23 @@ llm_service = LLMService(
     api_key=settings.openai_api_key,
     token_counter=token_counter
 )
-redis_client = redis.from_url(settings.redis_url)
-rate_limiter = RateLimiter(redis_client)
-stream_limiter = StreamLimiter(
-    redis_client,
-    default_limit=settings.max_concurrent_streams_per_user
-)
+# Redis-dependent services (optional — gracefully skipped if unavailable)
+_redis_client = None
+rate_limiter = None
+stream_limiter = None
+
+if settings.redis_url:
+    try:
+        _redis_client = redis.from_url(settings.redis_url)
+        _redis_client.ping()
+        rate_limiter = RateLimiter(_redis_client)
+        stream_limiter = StreamLimiter(
+            _redis_client,
+            default_limit=settings.max_concurrent_streams_per_user
+        )
+    except Exception:
+        import logging as _log
+        _log.warning("Redis unavailable — rate limiting and stream limiting disabled")
 
 
 def get_or_create_conversation(
@@ -138,36 +149,39 @@ async def chat(
     """
     trace_id = request.state.trace_id
 
-    # Rate limiting
-    allowed, count = rate_limiter.check_rate_limit(
-        str(user.id),
-        limit=user.rate_limit,
-        window=settings.rate_limit_window
-    )
-
-    if not allowed:
-        logger.warning("rate_limit_exceeded", user_id=str(user.id), count=count)
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded. Limit: {user.rate_limit} requests per hour",
-            headers={"X-RateLimit-Limit": str(user.rate_limit), "X-RateLimit-Remaining": "0"}
+    # Rate limiting (skipped if Redis unavailable)
+    if rate_limiter:
+        allowed, count = rate_limiter.check_rate_limit(
+            str(user.id),
+            limit=user.rate_limit,
+            window=settings.rate_limit_window
         )
 
-    # Atomically acquire a stream slot (avoids TOCTOU race)
-    stream_id = stream_limiter.try_acquire_stream(str(user.id))
-    if stream_id is None:
-        current_streams = stream_limiter.get_active_stream_count(str(user.id))
-        logger.warning(
-            "stream_limit_exceeded",
-            user_id=str(user.id),
-            current_streams=current_streams,
-            max_streams=settings.max_concurrent_streams_per_user
-        )
-        raise HTTPException(
-            status_code=429,
-            detail=f"Too many concurrent streams. Maximum: {settings.max_concurrent_streams_per_user}",
-            headers={"X-Stream-Limit": str(settings.max_concurrent_streams_per_user)}
-        )
+        if not allowed:
+            logger.warning("rate_limit_exceeded", user_id=str(user.id), count=count)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded. Limit: {user.rate_limit} requests per hour",
+                headers={"X-RateLimit-Limit": str(user.rate_limit), "X-RateLimit-Remaining": "0"}
+            )
+
+    # Atomically acquire a stream slot (skipped if Redis unavailable)
+    stream_id = None
+    if stream_limiter:
+        stream_id = stream_limiter.try_acquire_stream(str(user.id))
+        if stream_id is None:
+            current_streams = stream_limiter.get_active_stream_count(str(user.id))
+            logger.warning(
+                "stream_limit_exceeded",
+                user_id=str(user.id),
+                current_streams=current_streams,
+                max_streams=settings.max_concurrent_streams_per_user
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many concurrent streams. Maximum: {settings.max_concurrent_streams_per_user}",
+                headers={"X-Stream-Limit": str(settings.max_concurrent_streams_per_user)}
+            )
 
     logger.info(
         "chat_request_received",
@@ -355,10 +369,13 @@ async def chat(
 
         finally:
             # Always unregister stream on completion/error/cancel
-            stream_limiter.unregister_stream(user_id_str, stream_id)
+            if stream_limiter and stream_id:
+                stream_limiter.unregister_stream(user_id_str, stream_id)
 
     # Set rate limit headers
-    remaining = rate_limiter.get_remaining(str(user.id), user.rate_limit, settings.rate_limit_window)
+    remaining = user.rate_limit
+    if rate_limiter:
+        remaining = rate_limiter.get_remaining(str(user.id), user.rate_limit, settings.rate_limit_window)
 
     return StreamingResponse(
         event_stream(),

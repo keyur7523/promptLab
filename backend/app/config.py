@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str
 
-    # Redis
-    redis_url: str
+    # Redis (optional — rate limiting is skipped when unavailable)
+    redis_url: str = ""
 
     # OpenAI
     openai_api_key: str
