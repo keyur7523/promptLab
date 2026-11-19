@@ -1,12 +1,12 @@
-# Render Blueprint - Deploy entire stack with one click
+# Render Blueprint - backend + Redis only.
+# Frontend is on Vercel (https://prompt-lab-gold.vercel.app); Postgres is on Neon.
 # https://render.com/docs/blueprint-spec
 
 services:
-  # Backend API
+  # Backend API (https://promptlab-c3mb.onrender.com)
   - type: web
-    name: ai-chat-backend
+    name: promptlab
     runtime: python
-    region: oregon
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
@@ -22,35 +22,20 @@ services:
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: ai-chat-redis
+          name: promptlab-redis
           property: connectionString
       - key: OPENAI_API_KEY
-        sync: false  # Must be set manually in Render dashboard
+        sync: false  # Set in Render dashboard
       - key: FRONTEND_URL
-        value: https://ai-chat-frontend.onrender.com
+        value: https://prompt-lab-gold.vercel.app
       - key: RATE_LIMIT_REQUESTS
         value: "100"
       - key: RATE_LIMIT_WINDOW
         value: "3600"
 
-  # Frontend Static Site
-  - type: web
-    name: ai-chat-frontend
-    runtime: static
-    region: oregon
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
-    envVars:
-      - key: VITE_API_URL
-        value: https://ai-chat-backend.onrender.com
-      - key: VITE_API_KEY
-        value: test-api-key-12345  # Change after deployment
-
-  # Redis Cache
+  # Redis Cache (rate limiting)
   - type: keyvalue
-    name: ai-chat-redis
-    region: oregon
+    name: promptlab-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []  # internal connections only
