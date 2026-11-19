@@ -23,7 +23,7 @@ services:
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: ai-chat-redis
           property: connectionString
       - key: OPENAI_API_KEY
@@ -49,6 +49,14 @@ services:
       - key: VITE_API_KEY
         value: test-api-key-12345  # Change after deployment
 
+  # Redis Cache
+  - type: keyvalue
+    name: ai-chat-redis
+    region: oregon
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # internal connections only
+
 databases:
   # PostgreSQL Database
   - name: ai-chat-db
@@ -58,9 +66,3 @@ databases:
     plan: free
     ipAllowList: []  # Allow all IPs (required for external access)
 
-  # Redis Cache
-  - name: ai-chat-redis
-    region: oregon
-    plan: free
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []
