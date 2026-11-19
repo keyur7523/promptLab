@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str
-    llm_model: str = "gpt-3.5-turbo"
+    llm_model: str = "gpt-4o-mini"
 
     # Rate Limiting
     rate_limit_requests: int = 100
